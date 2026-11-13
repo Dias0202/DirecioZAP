@@ -448,7 +448,7 @@ Cobertura:
 
 ## Licenca
 
-Projeto privado. Todos os direitos reservados.
+[MIT](LICENSE).
 
 ---
 
