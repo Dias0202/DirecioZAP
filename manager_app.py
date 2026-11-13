@@ -858,7 +858,9 @@ class MensagensTab(ctk.CTkFrame):
             return
         try:
             r = requests.get(
-                f"http://localhost:3000/exportar?token={token}", timeout=10
+                "http://localhost:3000/exportar",
+                headers={"X-Verify-Token": token},
+                timeout=10,
             )
             if r.status_code == 404:
                 messagebox.showinfo("Aviso", "Nenhum cadastro salvo ainda.")
