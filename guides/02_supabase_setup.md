@@ -75,7 +75,7 @@ CREATE INDEX sessions_atualizado_em_idx ON sessions (atualizado_em);
    - **Project URL:** `https://XXXX.supabase.co` → vai no `SUPABASE_URL`
    - **anon public key:** `eyJhbGciOiJIUzI1NiIsInR5cCI...` → vai no `SUPABASE_KEY`
 
-> **Segurança:** A `anon key` é segura para uso no servidor. Nunca use a `service_role key` exposta — ela bypassa Row Level Security.
+> **Segurança:** as tabelas guardam telefone, CNPJ e contato dos fornecedores. Com a `anon key` e sem Row Level Security, qualquer pessoa com a URL do projeto e a chave anon (que é pública por desenho) lê e altera esses dados. Veja a seção **Seguranca** do README e a migration `supabase/migrations/20261113000000_enable_rls.sql`, que habilita RLS e passa o bot a usar a `service_role key` — que fica **só** no servidor e no `.env` local do Manager, nunca em navegador, build distribuído ou repositório.
 
 ---
 
