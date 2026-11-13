@@ -330,8 +330,12 @@ ngrok http 3000
 | Metodo | Rota | Descricao |
 |---|---|---|
 | GET | `/` | Health check |
-| POST | `/webhook` | Recebe mensagens do Twilio |
-| GET | `/exportar?token=SEU_TOKEN` | Baixa o Excel de cadastros |
+| POST | `/webhook` | Recebe mensagens do Twilio; exige `X-Twilio-Signature` valida (senao 403) |
+| GET | `/exportar` | Baixa o Excel de cadastros; exige o header `X-Verify-Token: SEU_TOKEN` (senao 403) |
+
+```bash
+curl -H "X-Verify-Token: SEU_TOKEN" "https://SEU_DOMINIO/exportar" -o fornecedores.xlsx
+```
 
 ---
 
@@ -372,6 +376,15 @@ O resultado estara em `dist\DirecioZAP_Manager\`.
 
 ---
 
+## Seguranca
+
+- **Assinatura do Twilio.** O `/webhook` recalcula a assinatura HMAC-SHA1 do Twilio (URL publica + parametros do formulario, com o `TWILIO_AUTH_TOKEN`) e responde **403** quando o header `X-Twilio-Signature` esta ausente ou nao confere. Atras do ngrok ou do Render, a URL publica vem de `TWILIO_WEBHOOK_URL` ou dos headers `X-Forwarded-Proto`/`X-Forwarded-Host`. Se o bot passar a responder 403 para mensagens reais, confira se `TWILIO_WEBHOOK_URL` e exatamente a URL configurada no console.
+- **Token do `/exportar`.** Vai no header `X-Verify-Token`, nao mais na query string (`?token=` deixou de ser aceito), para nao aparecer em logs de proxy, do ngrok e do Render.
+- **Supabase sem RLS.** O schema acima cria as tabelas sem Row Level Security, e o bot usa a chave anon. Como a chave anon e publica por desenho, qualquer um com ela e com a URL do projeto le e altera `cadastros`, `sessions` e `perguntas`. A migration `supabase/migrations/20261113000000_enable_rls.sql` habilita RLS sem politicas para `anon`/`authenticated` (negacao por padrao) e revoga os privilegios desses papeis. **Ela nao foi aplicada e precisa de revisao antes:** depois dela, `SUPABASE_KEY` no servidor e no Manager tem de ser a `service_role key`, mantida so no servidor e no `.env` local, nunca em build distribuido ou repositorio.
+- O Meta Cloud API (branch `META`) nao passa por este endpoint; a validacao de `X-Hub-Signature-256` daquela branch nao foi tratada aqui.
+
+---
+
 ## Testes
 
 ```bash
@@ -379,6 +392,7 @@ pytest -v
 ```
 
 Cobertura:
+- `test_main.py` — webhook, assinatura do Twilio (valida, invalida, ausente, corpo adulterado, URL atras de proxy) e `/exportar`
 - `test_conversation.py` — fluxo feliz e erros (18 cenarios)
 - `test_excel_writer.py` — criacao, append, concorrencia
 - `test_validators.py` — CNPJ, telefone, e-mail, estados
@@ -415,8 +429,9 @@ Cobertura:
 | `NGROK_AUTH_TOKEN` | Recomendado | Token de autenticacao do ngrok |
 | `NGROK_DOMAIN` | Nao | Dominio estatico ngrok |
 | `SUPABASE_URL` | Sim | URL do projeto Supabase |
-| `SUPABASE_KEY` | Sim | Chave anon public do Supabase |
-| `VERIFY_TOKEN` | Sim | Token para proteger `/exportar` |
+| `SUPABASE_KEY` | Sim | Chave do Supabase usada pelo servidor. Depois de aplicar a migration de RLS, precisa ser a `service_role` (ver **Seguranca**) |
+| `VERIFY_TOKEN` | Sim | Token para proteger `/exportar` (enviado no header `X-Verify-Token`) |
+| `TWILIO_WEBHOOK_URL` | Nao | URL publica do webhook, igual a do console Twilio; se vazia, vem dos headers `X-Forwarded-*` |
 | `EXCEL_PATH` | Nao | Caminho do arquivo Excel (padrao: `./data/fornecedores.xlsx`) |
 
 ---

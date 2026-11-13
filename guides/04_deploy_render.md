@@ -145,7 +145,7 @@ O arquivo `fornecedores.xlsx` é perdido em cada redeploy ou reinício.
 
 **Solução para v1.0:** Baixe o arquivo antes de fazer redeploy:
 ```bash
-curl "https://direciozap-bot.onrender.com/exportar?token=SEU_TOKEN" \
+curl -H "X-Verify-Token: SEU_TOKEN" "https://direciozap-bot.onrender.com/exportar" \
   -o fornecedores_backup_$(date +%Y%m%d).xlsx
 ```
 

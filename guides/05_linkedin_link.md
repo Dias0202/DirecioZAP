@@ -89,7 +89,7 @@ Algumas empresas colocam o link no primeiro comentário para não prejudicar o a
 4. Verifique se os dados foram salvos:
 
 ```bash
-curl "https://direciozap-bot.onrender.com/exportar?token=SEU_TOKEN" \
+curl -H "X-Verify-Token: SEU_TOKEN" "https://direciozap-bot.onrender.com/exportar" \
   -o fornecedores.xlsx
 
 # Abra no Excel e verifique os dados

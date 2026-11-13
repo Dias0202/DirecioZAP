@@ -9,10 +9,20 @@ from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
 from main import app
+from twilio_signature import compute_signature
 
 PHONE = "5531999990000"
 TOKEN = os.environ["VERIFY_TOKEN"]
 SANDBOX_FROM = "whatsapp:+14155238886"
+AUTH_TOKEN = os.environ["TWILIO_AUTH_TOKEN"]
+WEBHOOK_URL = "http://testserver/webhook"
+
+
+def _post_signed(client, data, url=WEBHOOK_URL, headers=None):
+    """POST to /webhook with the signature Twilio would send for ``url``."""
+    signed = {"X-Twilio-Signature": compute_signature(url, data.items(), AUTH_TOKEN)}
+    signed.update(headers or {})
+    return client.post("/webhook", data=data, headers=signed)
 
 
 @pytest.fixture
@@ -73,21 +83,21 @@ def test_A_health_check(client):
 
 class TestWebhookTexto:
     def test_A_processa_mensagem_de_texto(self, client, mock_manager, mock_send):
-        resp = client.post("/webhook", data=_form_texto(text="Empresa Teste Ltda"))
+        resp = _post_signed(client, _form_texto(text="Empresa Teste Ltda"))
         assert resp.status_code == 200
         mock_manager.process.assert_called_once_with(PHONE, "Empresa Teste Ltda")
 
     def test_A_envia_resposta_ao_usuario(self, client, mock_manager, mock_send):
         mock_manager.process.return_value = "Qual o seu CNPJ?"
-        client.post("/webhook", data=_form_texto())
+        _post_signed(client, _form_texto())
         mock_send.assert_called_once_with(PHONE, "Qual o seu CNPJ?")
 
     def test_A_extrai_numero_sem_plus(self, client, mock_manager, mock_send):
-        client.post("/webhook", data=_form_texto(phone="5511988887777"))
+        _post_signed(client, _form_texto(phone="5511988887777"))
         mock_manager.process.assert_called_once_with("5511988887777", "Olá")
 
     def test_A_strip_espacos_no_texto(self, client, mock_manager, mock_send):
-        client.post("/webhook", data=_form_texto(text="  Empresa Ltda  "))
+        _post_signed(client, _form_texto(text="  Empresa Ltda  "))
         mock_manager.process.assert_called_once_with(PHONE, "Empresa Ltda")
 
 
@@ -97,7 +107,7 @@ class TestWebhookTexto:
 
 class TestWebhookIgnorados:
     def test_B_mensagem_midia_envia_aviso_texto(self, client, mock_manager, mock_send):
-        resp = client.post("/webhook", data=_form_midia())
+        resp = _post_signed(client, _form_midia())
         assert resp.status_code == 200
         mock_send.assert_called_once()
         assert "texto" in mock_send.call_args[0][1].lower()
@@ -105,18 +115,18 @@ class TestWebhookIgnorados:
 
     def test_B_body_vazio_sem_midia_ignorado(self, client, mock_manager, mock_send):
         form = _form_texto(text="")
-        resp = client.post("/webhook", data=form)
+        resp = _post_signed(client, form)
         assert resp.status_code == 200
         mock_manager.process.assert_not_called()
         mock_send.assert_not_called()
 
     def test_B_sem_from_ignorado(self, client, mock_manager, mock_send):
-        resp = client.post("/webhook", data={"Body": "oi", "NumMedia": "0"})
+        resp = _post_signed(client, {"Body": "oi", "NumMedia": "0"})
         assert resp.status_code == 200
         mock_manager.process.assert_not_called()
 
     def test_B_num_media_maior_que_zero_bloqueia(self, client, mock_manager, mock_send):
-        resp = client.post("/webhook", data=_form_midia(num_media=2))
+        resp = _post_signed(client, _form_midia(num_media=2))
         assert resp.status_code == 200
         mock_manager.process.assert_not_called()
 
@@ -132,19 +142,103 @@ class TestExportar:
         wb = openpyxl.Workbook()
         wb.save(path)
         monkeypatch.setattr("main.settings.EXCEL_PATH", path)
-        resp = client.get(f"/exportar?token={TOKEN}")
+        resp = client.get("/exportar", headers={"X-Verify-Token": TOKEN})
         assert resp.status_code == 200
         assert "spreadsheetml" in resp.headers["content-type"]
 
     def test_B_retorna_403_com_token_errado(self, client):
-        resp = client.get("/exportar?token=token_errado")
+        resp = client.get("/exportar", headers={"X-Verify-Token": "token_errado"})
         assert resp.status_code == 403
 
     def test_B_retorna_403_sem_token(self, client):
         resp = client.get("/exportar")
-        assert resp.status_code == 422
+        assert resp.status_code == 403
+
+    def test_B_token_na_query_string_nao_e_mais_aceito(self, client):
+        resp = client.get(f"/exportar?token={TOKEN}")
+        assert resp.status_code == 403
 
     def test_B_retorna_404_sem_arquivo(self, client, tmp_path, monkeypatch):
         monkeypatch.setattr("main.settings.EXCEL_PATH", str(tmp_path / "nao_existe.xlsx"))
-        resp = client.get(f"/exportar?token={TOKEN}")
+        resp = client.get("/exportar", headers={"X-Verify-Token": TOKEN})
         assert resp.status_code == 404
+
+
+# ─────────────────────────────────────────────────────────────
+#  B — WEBHOOK: ASSINATURA DO TWILIO (X-Twilio-Signature)
+# ─────────────────────────────────────────────────────────────
+
+class TestAssinaturaTwilio:
+    def test_A_assinatura_valida_e_processada(self, client, mock_manager, mock_send):
+        resp = _post_signed(client, _form_texto())
+        assert resp.status_code == 200
+        mock_manager.process.assert_called_once()
+
+    def test_B_sem_assinatura_retorna_403(self, client, mock_manager, mock_send):
+        resp = client.post("/webhook", data=_form_texto())
+        assert resp.status_code == 403
+        mock_manager.process.assert_not_called()
+        mock_send.assert_not_called()
+
+    def test_B_assinatura_invalida_retorna_403(self, client, mock_manager, mock_send):
+        resp = client.post(
+            "/webhook", data=_form_texto(), headers={"X-Twilio-Signature": "assinatura-falsa"}
+        )
+        assert resp.status_code == 403
+        mock_manager.process.assert_not_called()
+
+    def test_B_corpo_alterado_apos_assinar_retorna_403(self, client, mock_manager, mock_send):
+        original = _form_texto(text="Olá")
+        signature = compute_signature(WEBHOOK_URL, original.items(), AUTH_TOKEN)
+        adulterado = dict(original, Body="mensagem trocada")
+        resp = client.post("/webhook", data=adulterado, headers={"X-Twilio-Signature": signature})
+        assert resp.status_code == 403
+        mock_manager.process.assert_not_called()
+
+    def test_B_assinatura_com_outro_auth_token_retorna_403(self, client, mock_manager, mock_send):
+        data = _form_texto()
+        signature = compute_signature(WEBHOOK_URL, data.items(), "outro_token")
+        resp = client.post("/webhook", data=data, headers={"X-Twilio-Signature": signature})
+        assert resp.status_code == 403
+
+    def test_A_url_publica_reconstruida_dos_headers_do_proxy(self, client, mock_manager, mock_send):
+        public = "https://abc123.ngrok-free.app/webhook"
+        resp = _post_signed(
+            client,
+            _form_texto(),
+            url=public,
+            headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "abc123.ngrok-free.app"},
+        )
+        assert resp.status_code == 200
+        mock_manager.process.assert_called_once()
+
+    def test_A_url_publica_configurada_tem_precedencia(
+        self, client, mock_manager, mock_send, monkeypatch
+    ):
+        public = "https://direciozap-bot.onrender.com/webhook"
+        monkeypatch.setattr("main.settings.TWILIO_WEBHOOK_URL", public)
+        resp = _post_signed(client, _form_texto(), url=public)
+        assert resp.status_code == 200
+        mock_manager.process.assert_called_once()
+
+    def test_B_url_configurada_diferente_da_assinada_retorna_403(
+        self, client, mock_manager, mock_send, monkeypatch
+    ):
+        monkeypatch.setattr("main.settings.TWILIO_WEBHOOK_URL", "https://outro-host/webhook")
+        resp = _post_signed(client, _form_texto())
+        assert resp.status_code == 403
+
+
+def test_compute_signature_igual_ao_sdk_oficial_do_twilio():
+    """Cross-check against twilio.request_validator when the SDK is installed."""
+    request_validator = pytest.importorskip("twilio.request_validator")
+    url = "https://mycompany.com/myapp.php?foo=1&bar=2"
+    params = {
+        "CallSid": "CA1234567890ABCDE",
+        "Caller": "+14158675310",
+        "Digits": "1234",
+        "From": "+14158675310",
+        "To": "+18005551212",
+    }
+    expected = request_validator.RequestValidator("12345").compute_signature(url, params)
+    assert compute_signature(url, params.items(), "12345") == expected
