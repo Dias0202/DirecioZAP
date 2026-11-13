@@ -141,9 +141,9 @@ Configure a URL pública do ngrok como webhook na Evolution API.
 
 | Variável | Valor |
 |---|---|
-| `EVOLUTION_API_KEY` | `HXsWhL0Ddp1JSOImTjw5xu8lVYPzMe4f` |
-| `VERIFY_TOKEN` | `db7ebc94edcb4c9c89f72911c6418d3a` |
-| `SUPABASE_URL` | `https://wawjmfaukdpyxwzqulfn.supabase.co` |
+| `EVOLUTION_API_KEY` | `<gerada localmente, nunca versionar>` |
+| `VERIFY_TOKEN` | `<gerado localmente, nunca versionar>` |
+| `SUPABASE_URL` | `https://<seu-projeto>.supabase.co` |
 
 > A `SUPABASE_KEY` está no `.env`. O `.env` não é commitado (`.gitignore`).
 
